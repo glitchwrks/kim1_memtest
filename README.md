@@ -32,7 +32,7 @@ Syntax `C:<start>,<end>=<data>`
 
 Example: enter `C040013FFFF` to check if the 4K of memory above the base onboard RAM contains all `0xFF`.
 
-Errors are reported as with the `T` command. Hit `<CR>` to restart the program.
+Errors are reported as with the `T` command, a splat `*` is printed on completion. Hit `<CR>` to restart the program.
 
 Building
 --------
