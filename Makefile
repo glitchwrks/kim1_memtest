@@ -14,7 +14,10 @@ memtest.bin: memtest.o
 	$(CL) $(LFLAGS) -C kim-1.cfg -o memtest.bin memtest.o
 
 ttytest.hex: ttytest.bin
-	srec_cat ttytest.bin -binary -unfill 0x00 16 -o ttytest.hex -mos_tech
+	dd if=ttytest.bin of=ttytest_tmp.bin bs=256 skip=2
+	srec_cat ttytest_tmp.bin -binary -offset 0x0200 -o ttytest.hex -mos_tech -obs=16
+	rm ttytest_tmp.bin
+	perl -i -pe 's|\n|\r\n|' ttytest.hex
 
 ttytest.bin: ttytest.o
 	$(CL) $(LFLAGS) -C kim-1.cfg -o ttytest.bin ttytest.o
