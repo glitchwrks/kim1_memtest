@@ -1,5 +1,5 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;MEMTEST.A65 -- Memory Tester for the KIM-1
+;TTYTEST.A65 -- Memory Tester for the KIM-1
 ;
 ;This program assumes a working KIM-1 and is intended to
 ;test external memory. It lives in the onboard 1K of SRAM.
@@ -76,7 +76,6 @@ TMLUP:	JSR	CIN		;Test mode selection loop
 	BNE	TMLUP		;No match? Loop again.
 
 L0224:	STA	USRCMD		;store command
-	JSR	COUT		;Echo command character
 	LDA	#':'
 	JSR	COUT		;Write ':' to screen for address start prompt
 
@@ -273,7 +272,9 @@ GTSVAL:	LDA	MEMPTR
 ;HEXSFT -- Hex Shift
 ;shift hex nybble from A into memory locations
 ;  A->VAR1->ENDPTR->ENDPTR+1->VAR2>VAR3 
-;  and echo current value to screen as '0-9','A-F'
+;
+;No echo for KIM-1 as the hardware does that for us.
+;
 ;A contains the hex value to shift in
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 HEXSFT:	PHA			;Preserve A for later
@@ -293,7 +294,7 @@ HXSLUP:	ROL	A		;shift nybble into memory locations
 	DEY
 	BNE	HXSLUP		;Shift again if Y is not 0
 	PLA			;Restore A
-	;Fall through to NYBOUT
+	RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;NYBOUT -- Nybble Out
@@ -383,9 +384,9 @@ CIN:	TYA			;Preserve Y register
 ;
 ;Falls through to COUT.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CRLF:	LDA #$0D
-	JSR COUT
-	LDA #$0A
+CRLF:	LDA 	#$0D
+	JSR 	COUT
+	LDA 	#$0A
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;COUT -- Print a character to the console
