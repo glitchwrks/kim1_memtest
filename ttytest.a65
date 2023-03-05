@@ -4,11 +4,33 @@
 ;This program assumes a working KIM-1 and is intended to
 ;test external memory. It lives in the onboard 1K of SRAM.
 ;
+;Testing or loading below 0x0400 will clobber the memory 
+;test program!
+;
 ;Commands are:
 ;
 ; * [T]est memory T:<start>,<end>
+;	Example: enter T040013FF to test 4K of memory above
+;	the base onboard RAM. A cycle count will be
+;	displayed, and an X will be printed ever 255 cycles.
+;
+;	If an error is encountered, the address will be
+;	displayed with the expected and actual content.
+;	Hit <CR> to restart the program.
+;
 ; * [L]oad memory L:<start>,<end>=<data>
+;	Example: enter L040013FFFF to fill 4K of memory 
+;	above the base onboard RAM with 0xFF.
+; 
+;	A splat * is printed on completion, hit <CR> to
+;	restart the program.
+;
 ; * [C]ompare memory C:<start>,<end>=<data>
+;	Example: enter C040013FFFF to check if the 4K of
+;	memory above the base onboard RAM contains all 0xFF.
+;
+;	Errors are reported as with the T command. Hit <CR>
+;	to restart the program.
 ;
 ;See README.md for a more detailed explanation of the tests,
 ;how to build from source, etc.
@@ -21,31 +43,16 @@
 ;Exhaustive memory test based heavily on the routines from
 ;the OSI MEMORY TEST from OS-65D 2.0, published in OSI
 ;Small Systems Journal, Volume 1, Number 3, September 1977.
+;
+;Modifications by Mark Spankus for better output with OSI
+;serial consoles.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;KIM-1 Equates
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-ROM002	=	$1C00		;Start of 6530-002
-ROM003	=	$1800		;Start of 6530-003
-
 GETCH	=	$1E5A		;A = char from TTY, clobbers Y
 OUTCH	=	$1EA0		;Print A on tty, clobbers A and Y
-OUTSP	=	$1E9E		;Print a space, clobbers A and Y
-
-;MEMORY TEST from OS65D 2.0 published in OSI Small System Journal Vol1 No.3, Sept 1977
-;Modified for universal use OSI400 ASCII KB, OSI C1P/SUPERBOARD, C2/C4/C8, C3 Serial systems by Mark Spankus
-;relocated to $222 to survive OSI <RESET>
-;occupies $0222-$03FF or so
-;
-; USAGE:  Commands are: T, L, C
-; The low memory address available for testing is $0400 as the program occupies the space $0000-03FF
-; [T]est Memory T:<start>,<end> ... Enter T04002000 to test RAM from 0400 to 1FFF
-;   address will count up, foe each loop that completes successfully an X will be displayed on the screen
-;   if an error is encountered, the address will be displayed with the written content and the read content
-;   press <CR> to restart the program
-; [L]oad Memory L:<start>,<end>=<data> ... Enter L04002000FF to fill 0400 to 1FFF with FF, a * is printed when complete
-; [C]ompare Memory C:<start>,<end>=<data> ... Enter C04000500FF to check 0400-04FF for FF, a * is printed when complete
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Zero Page Variables
