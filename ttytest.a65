@@ -28,8 +28,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ROM002	=	$1C00		;Start of 6530-002
 ROM003	=	$1800		;Start of 6530-003
-RIOTBAS	=	$A400		;Start of the 6530 RIOT
-RIOTEND	=	RIOTBAS+$80	;End of RIOT RAM
 
 GETCH	=	$1E5A		;A = char from TTY, clobbers Y
 OUTCH	=	$1EA0		;Print A on tty, clobbers A and Y
