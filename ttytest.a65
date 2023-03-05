@@ -1,0 +1,410 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMTEST.A65 -- Memory Tester for the KIM-1
+;
+;This program assumes a working KIM-1 and is intended to
+;test external memory. It lives in the onboard 1K of SRAM.
+;
+;Commands are:
+;
+; * [T]est memory T:<start>,<end>
+; * [L]oad memory L:<start>,<end>=<data>
+; * [C]ompare memory C:<start>,<end>=<data>
+;
+;See README.md for a more detailed explanation of the tests,
+;how to build from source, etc.
+;
+;(c) 2023 Glitch Works, LLC
+;http://www.glitchwrks.com/
+;
+;Released under the GNU GPL v3, see LICENSE in project root.
+;
+;Exhaustive memory test based heavily on the routines from
+;the OSI MEMORY TEST from OS-65D 2.0, published in OSI
+;Small Systems Journal, Volume 1, Number 3, September 1977.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;KIM-1 Equates
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ROM002	=	$1C00		;Start of 6530-002
+ROM003	=	$1800		;Start of 6530-003
+RIOTBAS	=	$A400		;Start of the 6530 RIOT
+RIOTEND	=	RIOTBAS+$80	;End of RIOT RAM
+
+GETCH	=	$1E5A		;A = char from TTY, clobbers Y
+OUTCH	=	$1EA0		;Print A on tty, clobbers A and Y
+OUTSP	=	$1E9E		;Print a space, clobbers A and Y
+
+;MEMORY TEST from OS65D 2.0 published in OSI Small System Journal Vol1 No.3, Sept 1977
+;Modified for universal use OSI400 ASCII KB, OSI C1P/SUPERBOARD, C2/C4/C8, C3 Serial systems by Mark Spankus
+;relocated to $222 to survive OSI <RESET>
+;occupies $0222-$03FF or so
+;
+; USAGE:  Commands are: T, L, C
+; The low memory address available for testing is $0400 as the program occupies the space $0000-03FF
+; [T]est Memory T:<start>,<end> ... Enter T04002000 to test RAM from 0400 to 1FFF
+;   address will count up, foe each loop that completes successfully an X will be displayed on the screen
+;   if an error is encountered, the address will be displayed with the written content and the read content
+;   press <CR> to restart the program
+; [L]oad Memory L:<start>,<end>=<data> ... Enter L04002000FF to fill 0400 to 1FFF with FF, a * is printed when complete
+; [C]ompare Memory C:<start>,<end>=<data> ... Enter C04000500FF to check 0400-04FF for FF, a * is printed when complete
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Zero Page Variables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CONTMP	=	$C3		;Temporary storage for CIN and COUT
+USRCMD	=	$C4		;Command character entered by the user
+PASCTR	=	$C5		;Pass Counter
+VAR1	=	$C7
+VAR2	=	$C8
+VAR3	=	$C9
+MEMPTR	=	$CA
+MEMPHI	=	$CB
+ENDPTR	=	$CC
+ENDPHI	=	$CD
+
+.segment "CODE"
+START:	JSR	CRLF		;send <CR><LF> to terminal
+
+	LDA	#'?'
+	JSR	COUT		; write '?' prompt
+
+TMLUP:	JSR	CIN		;Test mode selection loop
+	CMP	#'C'		;'C'ompare
+	BEQ	L0224	
+	CMP	#'L'		;'L'oad
+	BEQ	L0224
+	CMP	#'T'		;'T'est
+	BNE	TMLUP		;No match? Loop again.
+
+L0224:	STA	USRCMD		;store command
+	JSR	COUT		;Echo command character
+	LDA	#':'
+	JSR	COUT		;Write ':' to screen for address start prompt
+
+	LDX	#$00		;X is used to keep track of the number of characters in
+INADDR:	JSR	CIN
+	CMP	#$0D		;Return?
+	BEQ	START		;Yes. Start over
+
+	JSR	HEXCNV 		;Character to hex nibble
+	BMI	INADDR		;Invalid hex character, try again.
+
+	JSR	HEXSFT		;Shift the 4-bit value into paramter pointers
+
+	INX
+	CPX	#$04		;At 4th character?
+	BMI	INADDR		;No, <4, get more characters
+	BNE	L024B		;No, >4, check if we are done
+
+	LDA	#','		;Output ','
+	JSR	COUT
+
+L024B:	CPX	#$08		;At 8 characters input?
+
+L024D:	BMI	INADDR		;No, <8, get more characters
+	BNE	L02AE		;No, >8, get extra byte for "Load"
+
+	;We have 8 characters now
+	LDA	USRCMD		;Get the user command that was received earlier
+	AND	#$3F		;Mask off 6 bits ('C' -> $03, 'L' -> $0C, 'T' -> $14)
+	CMP	#$14		;Test?
+	BNE	L02A9		;No, get 2 more characters
+
+;Fall through into the memory tester
+	JSR	CRLF		;Print a CR,LF so that the test pass numbers are on the next line
+	
+;Shift $77 into VAR1
+	LDX	#$02
+L025C:	LDA	#$B7		;Upper nybble is set up to prevent output
+	JSR	HEXSFT		;Shift
+	DEX
+	BNE	L025C		;Shift 7 in again if X hasn't reached 0
+
+;X has been set to 0 by the loop
+;Start the test!
+;X is used to keep track of the number of passes
+
+;Start of Test
+STRTST:	JSR	RESTRT		;Move VAR2,VAR3 (user-entered starting address) into MEMPTR pointer
+
+	TXA			;Output the current pass
+	JSR	HINOUT		;Print high hex nibble
+	TXA
+	JSR	LONOUT		;Print low hex nibble
+
+	JSR	C3BAK		;Backspace 2 chars (the pass count we just printed) so that it gets over-written
+
+;Set all memory locations from VAR2,VAR3 to ENDPTR to the value calculated by GTSVAL
+TSTWRT:	JSR	GTSVAL		;Get a test data value based on the memory pointer address
+	STA	(MEMPTR),Y	;Store it at the address we're testing
+	JSR	INMPTR		;Increment the memory pointer
+	BNE	TSTWRT		;Loop again if MEMPTR <> ENDPTR
+
+	
+;Read back all memory locations from VAR2,VAR3 to ENDPTR and compare them to the calculated GTSVAL
+	JSR	RESTRT		;Restore START value to MEMPTR
+TESTRD:	JSR	GTSVAL		;Get the test data value based on the current memory pointer
+	CMP	(MEMPTR),Y		;Compare it to what was stored in the previous loop
+	BNE	TSTERR		;If they're different, throw an error
+	JSR	INMPTR		;Increment the memory pointer
+	BNE	TESTRD		;Loop again if MEMPTR <> ENDPTR
+
+	INX			;Increment the number of test passes
+	BNE	STRTST		;If we're <256 passes, test again.
+
+	LDA	#'X'   ;Output 'X'
+	JSR	COUT
+
+;Increment the pass counter and output a CRLF at 63 characters
+	INC	PASCTR
+	LDA	PASCTR
+	AND	#$3F
+	BNE	NLSKIP		;Don't print a CR LF if not on the 63rd character
+	JSR	CRLF
+NLSKIP:	JMP	STRTST
+
+
+
+L02A9:	LDA	#'='		;Output '='
+	JSR	COUT
+
+L02AE:	CPX	#$0A		;At 10th character?
+	BMI	L024D		;No, get another one.
+
+;Received 10th character
+	LDA	USRCMD		;Get the user command that was received earlier
+	AND	#$3F		;Mask off 6 bits ('C' -> $03, 'L' -> $0C, 'T' -> $14)
+	CMP	#$03		;Compare?
+	BEQ	STRCMP		;Yes, start compare function
+
+;Load function entry pointer
+;fill memory with VAR1 until end pointer ENDPTR
+	JSR	RESTRT
+LDLUP:	LDA	VAR1		;Load the fill value
+	STA	(MEMPTR),Y		;Store it at the current memory address
+	JSR	INMPTR		;Increment the current memory address
+	BNE	LDLUP		;Loop again if MEMPTR <> ENDPTR
+
+L02C7:	LDA	#' '	;Output a space
+	JSR	COUT
+	LDA	#'*'	;Output an asterisk
+	JSR	COUT
+
+;Carriage return wait loop
+CRLUP:	JSR	CIN	;wait for keypress
+	CMP	#$0D	;CR?
+	BNE	CRLUP	;Loop if not a CR
+	JMP	START	;Start from the beginning
+
+;Compare function entry point
+STRCMP:	JSR	RESTRT		;Restore START value to MEMPTR
+L02DE:	LDA	VAR1
+	CMP	(MEMPTR),Y
+	BNE	TSTERR
+	JSR	INMPTR
+	BNE	L02DE
+	BEQ	L02C7
+
+;Diplay the test error code
+;A contains the value that should have been read back
+TSTERR:	STA	VAR3		;Save value for later
+	LDA	(MEMPTR),Y
+	STA	VAR2
+
+;Output (MEMPHI,MEMPLO),VAR3,VAR2 in the form
+; MEMPTR GOOD BAD
+	LDX	#$04		;Set up X to keep track of the bytes printed
+
+L02F7:	LDA	#' '		;Outut a space
+	JSR	COUT
+
+L02FC:	LDA	VAR1,X
+	JSR	HINOUT		;Output the high nybble
+	LDA	VAR1,X
+	JSR	LONOUT		;Output the low nybble
+
+	DEX			;Move X to the next byte
+	BEQ	CRLUP		;At end? Wait for CR and start program again.
+	CPX	#$02		;Done printing the address?
+	BEQ	L02F7		;Yes, =2, output a space
+	BPL	L02FC		;No, <2, print the next byte
+	BMI	L02F7		;Yes, >2, output another space
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;INMPTR -- Increment Memory Pointer
+;Increments the memory pointer and compares the new value
+;  to ENDPTR. Compare flags are set.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+INMPTR:	INC	MEMPTR		;Increment the low byte
+	BNE	IMPCMP		;Didn't overflow, skip incrementing high byte
+	INC	MEMPTR+1	;Increment the high byte
+;Increment Memory Pointer CoMPare
+IMPCMP:	LDA	MEMPTR+1	;Compare the high byte
+	CMP	ENDPTR+1
+	BNE	IMPEND		;Return with Z flag clear if different
+	LDA	MEMPTR		;Compare the low byte
+	CMP	ENDPTR
+
+IMPEND:	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;RESTRT -- Restore Start
+;Move the VAR2,VAR3 pair into MEMPTR,MEMPTR+1
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RESTRT:	LDA	VAR2
+	STA	MEMPTR
+	LDA	VAR3
+	STA	MEMPTR+1
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;GTSVAL -- Get Test Value
+;Calculates a byte that is derived from the current
+;  memory address and pass count and return it in A
+;A = (MEMPTR ^ MEMPTR+1) ^ PASS_COUNT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GTSVAL:	LDA	MEMPTR
+	EOR	MEMPTR+1
+	STA	VAR1
+	TXA
+	EOR	VAR1
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;HEXSFT -- Hex Shift
+;shift hex nybble from A into memory locations
+;  A->VAR1->ENDPTR->ENDPTR+1->VAR2>VAR3 
+;  and echo current value to screen as '0-9','A-F'
+;A contains the hex value to shift in
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+HEXSFT:	PHA			;Preserve A for later
+	ASL	A		;shift nybble up
+	ASL	A
+	ASL	A
+	ASL	A
+
+	LDY	#$04		;Y is used to keep track of the number of shifts
+HXSLUP:	ROL	A		;shift nybble into memory locations
+	ROL	VAR1
+	ROL	ENDPTR		;hi range
+	ROL	ENDPTR+1
+	ROL	VAR2		;low range
+	ROL	VAR3
+
+	DEY
+	BNE	HXSLUP		;Shift again if Y is not 0
+	PLA			;Restore A
+	;Fall through to NYBOUT
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NYBOUT -- Nybble Out
+;Outputs the hex nybble in the lower 4 bits of A as a
+;  single ASCII character
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NYBOUT:	ORA	#$30		;Place the value up in the ASCII range
+
+	CMP	#':'		;Greater than '9'?
+	BMI	NYBGUD		;Nope, output the character
+	CMP	#'G'		;Greater than 'G'?
+	BCS	NYBBAD		;Yes, skip outputting the character
+
+	CLC			;Add 7 to push the value to A-F if it is greater than 9
+	ADC #$07
+
+NYBGUD:	JMP COUT		;Echo the character, and save an RTS by using a jmp.
+NYBBAD:	RTS			;Nybble is not valid
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;HINOUT -- High Nybble Out
+;Outputs the hex nybble in the upper 4 bits of A as a
+;  single ASCII character.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+HINOUT:	LSR	A		;Shift the high nybble down
+	LSR	A
+	LSR	A
+	LSR	A
+	;Fall through to LONOUT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;LONOUT -- High Nybble Out
+;Outputs the hex nybble in the lower 4 bits of A as a
+;  single ASCII character.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LONOUT:	AND	#$0F
+	BPL	NYBOUT ;always
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;C3BAK -- Challenger 3 Backspace
+;Sends 2 backspace characters to the console
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+C3BAK:	LDA	#$08
+	JSR	COUT
+	JMP	COUT
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;HEXCNV -- Hex Conversion
+;
+;Takes an ASCII character in A and converts it to its 4-bit
+;  HEX value. Stores the result in A.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+HEXCNV:	CMP	#$30
+	BMI	HEXERR
+	CMP	#$3A
+	BMI	HEXMSK
+	CMP	#$41
+	BMI	HEXERR
+	CMP	#$47
+	BPL	HEXERR
+	SEC
+	SBC	#$07
+HEXMSK:	AND	#$0F
+	RTS
+HEXERR:	LDA	#$80
+	RTS
+ 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;CIN -- Get a character from the console
+;
+;Blocks until a character is available. Calls to KIM-1 ROM
+;routines.
+;
+;pre: KIM-1 serial initialized
+;post: A register contains received character
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CIN:	TYA			;Preserve Y register
+	STA	CONTMP
+	JSR	GETCH		;Get char from TTY
+	PHA			;Save char on stack
+	LDA	CONTMP		;Get contents of Y register
+	TAY			;Restore it
+	PLA			;A = char from TTY
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;CRLF -- Print a carriage return and a linefeed to console
+;
+;Falls through to COUT.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CRLF:	LDA #$0D
+	JSR COUT
+	LDA #$0A
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COUT -- Print a character to the console
+;
+;Call to KIM-1 ROM routines.
+;
+;pre: A register contains character to print
+;post: character printed to console
+;post: A register contains character that was printed
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+COUT:	PHA			;Save char to print
+	TYA			;Preserve Y register
+	STA	CONTMP
+	PLA			;A = char to print
+	PHA			;Back on the stack
+	JSR	OUTCH		;Print A to TTY
+	LDA	CONTMP		;Restore Y register
+	TAY
+	PLA			;Restore A register.
+	RTS
