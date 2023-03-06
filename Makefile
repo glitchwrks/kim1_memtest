@@ -19,11 +19,8 @@ ttytest.hex: ttytest.bin
 	rm ttytest_tmp.bin
 	perl -i -pe 's|\n|\r\n|' ttytest.hex
 
-ttytest.bin: ttytest.o
-	$(CL) $(LFLAGS) -C kim-1.cfg -o ttytest.bin ttytest.o
-
-ttytest.o: ttytest.a65
-	$(CA) $(AFLAGS) -o ttytest.o ttytest.a65
+ttytest.bin:
+	$(CL) $(LFLAGS) -C kim-1.cfg -l ttytest.prn -o ttytest.bin ttytest.a65
 
 clean:
-	rm -f *.o *.bin *.bin.bak *.hex
+	rm -f *.o *.bin *.bin.bak *.hex *.prn
