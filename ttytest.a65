@@ -52,6 +52,7 @@ ENDADH	=	$CD		;User-entered end address high byte
 
 PXSTRT	=	$D0		;Current pattern start offset
 PATBYT	=	$D1		;Current pattern byte
+PXIDX	=	$D2		;Current pattern index
 
 .segment "CODE"
 START:	CLD			;No decimal mode
@@ -201,22 +202,9 @@ RESTRT:	LDA	STARTL
 	RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;GTSVAL -- Get Test Value
-;Calculates a byte that is derived from the current
-;  memory address and pass count and return it in A
-;A = (MEMPTL ^ MEMPTL+1) ^ PASS_COUNT
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-GTSVAL:	LDA	MEMPTL
-	EOR	MEMPTL+1
-	STA	VAR1
-	TXA
-	EOR	VAR1
-	RTS
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HEXSFT -- Hex Shift
 ;shift hex nybble from A into memory locations
-;  A->VAR1->ENDADL->ENDADL+1->STARTL>STARTH 
+;  A->VAR1->ENDADH->ENDADL->STARTH->STARTL 
 ;
 ;No echo for KIM-1 as the hardware does that for us.
 ;
@@ -231,10 +219,10 @@ HEXSFT:	PHA			;Preserve A for later
 	LDY	#$04		;Y is used to keep track of the number of shifts
 HXSLUP:	ROL	A		;shift nybble into memory locations
 	ROL	VAR1
-	ROL	ENDADL		;hi range
-	ROL	ENDADL+1
-	ROL	STARTL		;low range
-	ROL	STARTH
+	ROL	ENDADH		;Ending address
+	ROL	ENDADL
+	ROL	STARTH		;Starting address
+	ROL	STARTL
 
 	DEY
 	BNE	HXSLUP		;Shift again if Y is not 0
@@ -276,14 +264,6 @@ HINOUT:	LSR	A		;Shift the high nybble down
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 LONOUT:	AND	#$0F
 	BPL	NYBOUT ;always
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;C3BAK -- Challenger 3 Backspace
-;Sends 2 backspace characters to the console
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-C3BAK:	LDA	#$08
-	JSR	COUT
-	JMP	COUT
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HEXCNV -- Hex Conversion
@@ -360,10 +340,14 @@ COUT:	PHA			;Save char to print
 ;
 ;Run Martin Eberhard's MTEST4.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NEWTST:	LDA	#$00
+NEWTST:	LDA	#'%'		;Show we're testing
+	JSR	COUT
+	LDA	#$00
 	STA	PASCTR		;Zero the pass counter
 	LDY	PATLEN+1	;Y = initial pattern start
 	STY	PXSTRT		;Save to the pattern start variable
+	INC	STARTL
+	DEC	ENDADL
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;NXTPAS - Main memory test loop
@@ -381,6 +365,7 @@ NXTPAS:	LDA	STARTL		;Set up current memory pointer
 	LDA	STARTH
 	STA	MEMPTH
 	LDY	PXSTRT		;Get the current pattern start
+	STY	PXIDX
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;NXTBYT -- Test and write the next byte in memory
@@ -396,9 +381,11 @@ NXTPAS:	LDA	STARTL		;Set up current memory pointer
 ;pre: ENDADL, ENDADH contain the ending address
 ;pre: Y register contains index into test pattern
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NXTBYT:	DEY			;Decrement pattern index
+NXTBYT:	LDY	PXIDX		;Current pattern index
+	DEY			;Decrement pattern index
 	BNE	NXTBY1		;Nonzero, continue
 	LDY	PXSTRT		;Zero, reload from the current pattern start
+	STY	PXIDX		;Store it in the index var
 NXTBY1:	LDA	PATTRN, Y	;Get next pattern entry
 	STA	PATBYT		;Save it
 
@@ -436,13 +423,15 @@ NXTBY4:	LDA	MEMPTL		;A = low byte of memory pointer
 	LDA	#'.'		;Print pass activity indicator
 	JSR	COUT
 
+	JMP	DONE	
+
 	INC	PASCTR		;Increment pass counter
 	DEC	PXSTRT		;Bump pattern start point
 	BNE	NXTPAS		;Next pass through memory
 
 DONE:	LDA	#'*'		;Print done indicator
 	JSR	COUT
-DONE1:	BNE	DONE		;Get stuck in a loop	
+DONE1:	BNE	DONE1		;Get stuck in a loop	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;PRTERR -- Print a memory test error
@@ -521,10 +510,12 @@ PRTNI1:	JMP	COUT
 ;  to cause a lot of bit-flipping and to catch any bit-
 ;  coupling and address-coupling problems.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PATTRN:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
+PATTRN	=	*
+
+PATBEG:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
 	.byte	$10, $EF, $20, $FD, $40, $BF, $80, $7F
 	.byte	$00, $FF, $55, $AA, $33, $CC, $F0, $0F
 	.byte	$C3, $3C, $66, $99, $78
 PATEND:	.byte	$01
 
-PATLEN	=	PATEND - PATTRN	;Pattern length
+PATLEN	=	PATEND - PATBEG	;Pattern length
