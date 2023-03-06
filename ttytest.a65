@@ -50,7 +50,9 @@ ENDPTR	=	$CC
 ENDPHI	=	$CD
 
 .segment "CODE"
-START:	JSR	CRLF		;send <CR><LF> to terminal
+START:	CLD			;No decimal mode
+	SEI			;Interrupts masked
+	JSR	CRLF		;send <CR><LF> to terminal
 
 	LDA	#'?'
 	JSR	COUT		; write '?' prompt
