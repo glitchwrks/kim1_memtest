@@ -34,6 +34,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GETCH	=	$1E5A		;A = char from TTY, clobbers Y
 OUTCH	=	$1EA0		;Print A on tty, clobbers A and Y
+OUTSP	=	$1E9E		;Print a space on TTY, clobbers A and Y
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Zero Page Variables
@@ -41,13 +42,16 @@ OUTCH	=	$1EA0		;Print A on tty, clobbers A and Y
 CONTMP	=	$C3		;Temporary storage for CIN and COUT
 USRCMD	=	$C4		;Command character entered by the user
 PASCTR	=	$C5		;Pass Counter
-VAR1	=	$C7
-VAR2	=	$C8
-VAR3	=	$C9
-MEMPTR	=	$CA
-MEMPHI	=	$CB
-ENDPTR	=	$CC
-ENDPHI	=	$CD
+VAR1	=	$C7		;Memory fill value
+STARTL	=	$C8		;User-entered start address low byte
+STARTH	=	$C9		;User-entered start address high byte
+MEMPTL	=	$CA		;Current testing address low byte
+MEMPTH	=	$CB		;Current testing address high byte
+ENDADL	=	$CC		;User-entered end address low byte
+ENDADH	=	$CD		;User-entered end address high byte
+
+PXSTRT	=	$D0		;Current pattern start offset
+PATBYT	=	$D1		;Current pattern byte
 
 .segment "CODE"
 START:	CLD			;No decimal mode
@@ -100,59 +104,10 @@ L024D:	BMI	INADDR		;No, <8, get more characters
 
 ;Fall through into the memory tester
 	JSR	CRLF		;Print a CR,LF so that the test pass numbers are on the next line
-	
-;Shift $77 into VAR1
-	LDX	#$02
-L025C:	LDA	#$B7		;Upper nybble is set up to prevent output
-	JSR	HEXSFT		;Shift
-	DEX
-	BNE	L025C		;Shift 7 in again if X hasn't reached 0
 
-;X has been set to 0 by the loop
-;Start the test!
-;X is used to keep track of the number of passes
+	JMP	NEWTST		;Do the test
 
-;Start of Test
-STRTST:	JSR	RESTRT		;Move VAR2,VAR3 (user-entered starting address) into MEMPTR pointer
-
-	TXA			;Output the current pass
-	JSR	HINOUT		;Print high hex nibble
-	TXA
-	JSR	LONOUT		;Print low hex nibble
-
-	JSR	C3BAK		;Backspace 2 chars (the pass count we just printed) so that it gets over-written
-
-;Set all memory locations from VAR2,VAR3 to ENDPTR to the value calculated by GTSVAL
-TSTWRT:	JSR	GTSVAL		;Get a test data value based on the memory pointer address
-	STA	(MEMPTR),Y	;Store it at the address we're testing
-	JSR	INMPTR		;Increment the memory pointer
-	BNE	TSTWRT		;Loop again if MEMPTR <> ENDPTR
-
-	
-;Read back all memory locations from VAR2,VAR3 to ENDPTR and compare them to the calculated GTSVAL
-	JSR	RESTRT		;Restore START value to MEMPTR
-TESTRD:	JSR	GTSVAL		;Get the test data value based on the current memory pointer
-	CMP	(MEMPTR),Y		;Compare it to what was stored in the previous loop
-	BNE	TSTERR		;If they're different, throw an error
-	JSR	INMPTR		;Increment the memory pointer
-	BNE	TESTRD		;Loop again if MEMPTR <> ENDPTR
-
-	INX			;Increment the number of test passes
-	BNE	STRTST		;If we're <256 passes, test again.
-
-	LDA	#'X'   ;Output 'X'
-	JSR	COUT
-
-;Increment the pass counter and output a CRLF at 63 characters
-	INC	PASCTR
-	LDA	PASCTR
-	AND	#$3F
-	BNE	NLSKIP		;Don't print a CR LF if not on the 63rd character
-	JSR	CRLF
-NLSKIP:	JMP	STRTST
-
-
-
+; Get more chars for C and L commands
 L02A9:	LDA	#'='		;Output '='
 	JSR	COUT
 
@@ -166,12 +121,12 @@ L02AE:	CPX	#$0A		;At 10th character?
 	BEQ	STRCMP		;Yes, start compare function
 
 ;Load function entry pointer
-;fill memory with VAR1 until end pointer ENDPTR
+;fill memory with VAR1 until end pointer ENDADL
 	JSR	RESTRT
 LDLUP:	LDA	VAR1		;Load the fill value
-	STA	(MEMPTR),Y		;Store it at the current memory address
+	STA	(MEMPTL),Y		;Store it at the current memory address
 	JSR	INMPTR		;Increment the current memory address
-	BNE	LDLUP		;Loop again if MEMPTR <> ENDPTR
+	BNE	LDLUP		;Loop again if MEMPTL <> ENDADL
 
 L02C7:	LDA	#' '	;Output a space
 	JSR	COUT
@@ -185,9 +140,9 @@ CRLUP:	JSR	CIN	;wait for keypress
 	JMP	START	;Start from the beginning
 
 ;Compare function entry point
-STRCMP:	JSR	RESTRT		;Restore START value to MEMPTR
+STRCMP:	JSR	RESTRT		;Restore START value to MEMPTL
 L02DE:	LDA	VAR1
-	CMP	(MEMPTR),Y
+	CMP	(MEMPTL),Y
 	BNE	TSTERR
 	JSR	INMPTR
 	BNE	L02DE
@@ -195,12 +150,12 @@ L02DE:	LDA	VAR1
 
 ;Diplay the test error code
 ;A contains the value that should have been read back
-TSTERR:	STA	VAR3		;Save value for later
-	LDA	(MEMPTR),Y
-	STA	VAR2
+TSTERR:	STA	STARTH		;Save value for later
+	LDA	(MEMPTL),Y
+	STA	STARTL
 
-;Output (MEMPHI,MEMPLO),VAR3,VAR2 in the form
-; MEMPTR GOOD BAD
+;Output (MEMPTH,MEMPLO),STARTH,STARTL in the form
+; MEMPTL GOOD BAD
 	LDX	#$04		;Set up X to keep track of the bytes printed
 
 L02F7:	LDA	#' '		;Outut a space
@@ -221,38 +176,38 @@ L02FC:	LDA	VAR1,X
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;INMPTR -- Increment Memory Pointer
 ;Increments the memory pointer and compares the new value
-;  to ENDPTR. Compare flags are set.
+;  to ENDADL. Compare flags are set.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
-INMPTR:	INC	MEMPTR		;Increment the low byte
+INMPTR:	INC	MEMPTL		;Increment the low byte
 	BNE	IMPCMP		;Didn't overflow, skip incrementing high byte
-	INC	MEMPTR+1	;Increment the high byte
+	INC	MEMPTL+1	;Increment the high byte
 ;Increment Memory Pointer CoMPare
-IMPCMP:	LDA	MEMPTR+1	;Compare the high byte
-	CMP	ENDPTR+1
+IMPCMP:	LDA	MEMPTL+1	;Compare the high byte
+	CMP	ENDADL+1
 	BNE	IMPEND		;Return with Z flag clear if different
-	LDA	MEMPTR		;Compare the low byte
-	CMP	ENDPTR
+	LDA	MEMPTL		;Compare the low byte
+	CMP	ENDADL
 
 IMPEND:	RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;RESTRT -- Restore Start
-;Move the VAR2,VAR3 pair into MEMPTR,MEMPTR+1
+;Move the STARTL,STARTH pair into MEMPTL,MEMPTL+1
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-RESTRT:	LDA	VAR2
-	STA	MEMPTR
-	LDA	VAR3
-	STA	MEMPTR+1
+RESTRT:	LDA	STARTL
+	STA	MEMPTL
+	LDA	STARTH
+	STA	MEMPTL+1
 	RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;GTSVAL -- Get Test Value
 ;Calculates a byte that is derived from the current
 ;  memory address and pass count and return it in A
-;A = (MEMPTR ^ MEMPTR+1) ^ PASS_COUNT
+;A = (MEMPTL ^ MEMPTL+1) ^ PASS_COUNT
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-GTSVAL:	LDA	MEMPTR
-	EOR	MEMPTR+1
+GTSVAL:	LDA	MEMPTL
+	EOR	MEMPTL+1
 	STA	VAR1
 	TXA
 	EOR	VAR1
@@ -261,7 +216,7 @@ GTSVAL:	LDA	MEMPTR
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;HEXSFT -- Hex Shift
 ;shift hex nybble from A into memory locations
-;  A->VAR1->ENDPTR->ENDPTR+1->VAR2>VAR3 
+;  A->VAR1->ENDADL->ENDADL+1->STARTL>STARTH 
 ;
 ;No echo for KIM-1 as the hardware does that for us.
 ;
@@ -276,10 +231,10 @@ HEXSFT:	PHA			;Preserve A for later
 	LDY	#$04		;Y is used to keep track of the number of shifts
 HXSLUP:	ROL	A		;shift nybble into memory locations
 	ROL	VAR1
-	ROL	ENDPTR		;hi range
-	ROL	ENDPTR+1
-	ROL	VAR2		;low range
-	ROL	VAR3
+	ROL	ENDADL		;hi range
+	ROL	ENDADL+1
+	ROL	STARTL		;low range
+	ROL	STARTH
 
 	DEY
 	BNE	HXSLUP		;Shift again if Y is not 0
@@ -397,3 +352,179 @@ COUT:	PHA			;Save char to print
 	TAY
 	PLA			;Restore A register.
 	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NEWTST -- New memory test algorithm
+;
+;Falls through to NXTPAS
+;
+;Run Martin Eberhard's MTEST4.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NEWTST:	LDA	#$00
+	STA	PASCTR		;Zero the pass counter
+	LDY	PATLEN+1	;Y = initial pattern start
+	STY	PXSTRT		;Save to the pattern start variable
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NXTPAS - Main memory test loop
+;
+;This routine has been adapted from Martin Eberhard's MTEST4
+;for Altair 680.
+;
+;Falls through to NXTBYT.
+;
+;pre: STARTL, STARTH contain starting address
+;pre: ENDADL, ENDADH contain ending address
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NXTPAS:	LDA	STARTL		;Set up current memory pointer
+	STA	MEMPTL
+	LDA	STARTH
+	STA	MEMPTH
+	LDY	PXSTRT		;Get the current pattern start
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NXTBYT -- Test and write the next byte in memory
+;
+;This routine has been adapted from Martin Eberhard's MTEST4
+;for Altair 680.
+;
+;Due to architecture limitations, we can't do the "torture
+;test" that Martin does by flipping the byte in memory fast
+;several times.
+;
+;pre: MEMPTL, MEMPTH point to an address in the test range
+;pre: ENDADL, ENDADH contain the ending address
+;pre: Y register contains index into test pattern
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NXTBYT:	DEY			;Decrement pattern index
+	BNE	NXTBY1		;Nonzero, continue
+	LDY	PXSTRT		;Zero, reload from the current pattern start
+NXTBY1:	LDA	PATTRN, Y	;Get next pattern entry
+	STA	PATBYT		;Save it
+
+	LDA	#$00
+	CMP	PASCTR		;Are we on the first pass?
+	BEQ	NXTBY3		;First pass, don't read test yet
+
+NXTBY2:	LDY	#$00
+	LDA	(MEMPTL), Y	;Get currently addressed memory contents
+	CMP	PATBYT		;Compare to the current pattern byte
+	BEQ	NXTBY3		;OK, keep going
+	JSR	PRTERR		;Display error message
+
+
+NXTBY3:	LDA	PATBYT		;Get pattern byte
+	LDY	#$00		;Clear index
+	STA	(MEMPTL), Y	;Store it at current address
+
+; Maybe come up with something to stress the location here? Martin used
+; a direct memory COM in the 6800 version, but we don't have that.
+
+	INC	MEMPTL		;Increment memory pointer low byte
+	BNE	NXTBY4		;No overflow, continue
+	INC	MEMPTH		;Increment memory pointer high byte
+
+NXTBY4:	LDA	MEMPTL		;A = low byte of memory pointer
+	CMP	ENDADL		;Compare to low byte ending address
+	BNE	NXTBYT		;Not there yet, keep going
+	LDA	MEMPTH		;A = high byte of memory pointer
+	CMP	ENDADH		;Compare to high byte ending address
+	BNE	NXTBYT		;Not done yet, keep going
+
+;Print the pass number here?
+
+	LDA	#'.'		;Print pass activity indicator
+	JSR	COUT
+
+	INC	PASCTR		;Increment pass counter
+	DEC	PXSTRT		;Bump pattern start point
+	BNE	NXTPAS		;Next pass through memory
+
+DONE:	LDA	#'*'		;Print done indicator
+	JSR	COUT
+DONE1:	BNE	DONE		;Get stuck in a loop	
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PRTERR -- Print a memory test error
+;
+;pre: MEMPTL, MEMPTH point to the address of the error
+;pre: A register contains the byte read from memory
+;pre: PATBYT contains the expected byte
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRTERR:	PHA			;Save byte read from memory on stack
+	JSR	PRTADR		;Print the address of the error
+	JSR	OUTSP		;Print a space, KIM-1 ROM routine
+	PLA			;Restore byte read from memory
+	JSR	PRTHEX		;Print the byte read from memory
+	LDA	PATBYT		;A = expected byte
+	JSR	PRTHEX		;Print expected byte
+	RTS
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PRTADR -- Print an address to the console
+;
+;Prints CR, LF, 16-bit address, a space, and a colon. 
+;Destroys A register contents.
+;
+;Returns through COUT.
+;
+;pre: MEMPTL, MEMPTH contains address to print
+;post: address printed to console as hex
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRTADR: JSR	CRLF
+	LDA	MEMPTH
+	JSR	PRTHEX
+	LDA	MEMPTL
+	JSR	PRTHEX
+	LDA	#':'
+	JMP	COUT
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PRTHEX -- Output byte to console as hex
+;
+;Falls through to PRTNIB.
+;
+;pre: A register contains byte to be output
+;post: byte is output to console as hex
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRTHEX: PHA			;Save A register on stack
+	LSR			;Rotate high nybble down
+	LSR
+	LSR
+	LSR
+	JSR	PRTNIB		;Print high nybble
+	PLA			;Restore A register
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PRTNIB -- Print hex nybble on console
+;
+;Returns through COUT.
+;
+;pre: A register contains nybble
+;post: nybble printed to console
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRTNIB:	AND	#$0F
+	ORA	#'0'		;Add ASCII bias
+	CMP	#':'		;0x0 - 0x9?
+	BCC	PRTNI1
+	ADC	#$06		;Add hex bias
+PRTNI1:	JMP	COUT
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PATTRN -- Test pattern sequence
+;
+;This pattern is taken directly from Martin Eberhard's
+;MTEST4 program for the Altair 680. From his comments:
+;
+;  Test pattern sequence, a prime number in length. Designed
+;  to cause a lot of bit-flipping and to catch any bit-
+;  coupling and address-coupling problems.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PATTRN:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
+	.byte	$10, $EF, $20, $FD, $40, $BF, $80, $7F
+	.byte	$00, $FF, $55, $AA, $33, $CC, $F0, $0F
+	.byte	$C3, $3C, $66, $99, $78
+PATEND:	.byte	$01
+
+PATLEN	=	PATEND - PATTRN	;Pattern length
