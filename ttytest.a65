@@ -53,6 +53,7 @@ ENDADH	=	$CD		;User-entered end address high byte
 PXSTRT	=	$D0		;Current pattern start offset
 PATBYT	=	$D1		;Current pattern byte
 PXIDX	=	$D2		;Current pattern index
+PXPREV	=	$D3		;Previous pattern byte
 
 .segment "CODE"
 START:	CLD			;No decimal mode
@@ -340,9 +341,7 @@ COUT:	PHA			;Save char to print
 ;
 ;Run Martin Eberhard's MTEST4.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NEWTST:	LDA	#'%'		;Show we're testing
-	JSR	COUT
-	LDA	#$00
+NEWTST:	LDA	#$00
 	STA	PASCTR		;Zero the pass counter
 	LDY	#PATLEN+1	;Y = initial pattern start
 	STY	PXSTRT		;Save to the pattern start variable
@@ -381,21 +380,24 @@ NXTPAS:	LDA	STARTL		;Set up current memory pointer
 ;pre: ENDADL, ENDADH contain the ending address
 ;pre: Y register contains index into test pattern
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NXTBYT:	LDY	PXIDX		;Current pattern index
-	DEY			;Decrement pattern index
+NXTBYT:	DEC	PXIDX		;Decrement index to next pattern byte
 	BNE	NXTBY1		;Nonzero, continue
-	LDY	PXSTRT		;Zero, reload from the current pattern start
+	LDY	PXSTRT+1	;Zero, reload from the current pattern start
 	STY	PXIDX		;Store it in the index var
-NXTBY1:	LDA	PATTRN, Y	;Get next pattern entry
+NXTBY1:	LDY	PXIDX		;Index to next pattery byte
+	LDA	PATTRN, Y	;Get next pattern entry
 	STA	PATBYT		;Save it
 
 	LDA	#$00
 	CMP	PASCTR		;Are we on the first pass?
 	BEQ	NXTBY3		;First pass, don't read test yet
 
+	INY			;Going to verify, get previous element
+	LDA	PATTRN, Y
+	STA	PXPREV
 NXTBY2:	LDY	#$00
 	LDA	(MEMPTL), Y	;Get currently addressed memory contents
-	CMP	PATBYT		;Compare to the current pattern byte
+	CMP	PXPREV		;Compare to the previous pattern byte
 	BEQ	NXTBY3		;OK, keep going
 	JSR	PRTERR		;Display error message
 
@@ -421,9 +423,7 @@ NXTBY4:	LDA	MEMPTL		;A = low byte of memory pointer
 ;Print the pass number here?
 
 	LDA	#'.'		;Print pass activity indicator
-	JSR	COUT
-
-	JMP	DONE	
+	JSR	COUT	
 
 	INC	PASCTR		;Increment pass counter
 	DEC	PXSTRT		;Bump pattern start point
@@ -445,6 +445,7 @@ PRTERR:	PHA			;Save byte read from memory on stack
 	JSR	OUTSP		;Print a space, KIM-1 ROM routine
 	PLA			;Restore byte read from memory
 	JSR	PRTHEX		;Print the byte read from memory
+	JSR	OUTSP		;Print a space, KIM-1 ROM routine
 	LDA	PATBYT		;A = expected byte
 	JSR	PRTHEX		;Print expected byte
 	RTS
@@ -510,12 +511,10 @@ PRTNI1:	JMP	COUT
 ;  to cause a lot of bit-flipping and to catch any bit-
 ;  coupling and address-coupling problems.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-PATTRN	=	*
-
-PATBEG:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
+PATTRN:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
 	.byte	$10, $EF, $20, $FD, $40, $BF, $80, $7F
 	.byte	$00, $FF, $55, $AA, $33, $CC, $F0, $0F
 	.byte	$C3, $3C, $66, $99, $78
 PATEND:	.byte	$01
 
-PATLEN	=	PATEND - PATBEG	;Pattern length
+PATLEN	=	PATEND - PATTRN	;Pattern length
