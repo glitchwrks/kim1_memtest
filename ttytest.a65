@@ -52,7 +52,7 @@ ENDADH	=	$CD		;User-entered end address high byte
 
 PXSTRT	=	$D0		;Current pattern start offset
 PATBYT	=	$D1		;Current pattern byte
-PXIDX	=	$D2		;Current pattern index
+PXPTR	=	$D2		;Current pattern index
 PXPREV	=	$D3		;Previous pattern byte
 
 .segment "CODE"
@@ -345,7 +345,8 @@ NEWTST:	LDA	#$00
 	STA	PASCTR		;Zero the pass counter
 	LDY	#PATLEN+1	;Y = initial pattern start
 	STY	PXSTRT		;Save to the pattern start variable
-	INC	STARTL
+
+	INC	STARTL		;Fixup addresses from old OSI signon
 	DEC	ENDADL
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -363,8 +364,8 @@ NXTPAS:	LDA	STARTL		;Set up current memory pointer
 	STA	MEMPTL
 	LDA	STARTH
 	STA	MEMPTH
-	LDY	PXSTRT		;Get the current pattern start
-	STY	PXIDX
+	LDA	PXSTRT		;Get the current pass pattern start
+	STA	PXPTR		;Initialize PXPTR to it
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;NXTBYT -- Test and write the next byte in memory
@@ -378,31 +379,29 @@ NXTPAS:	LDA	STARTL		;Set up current memory pointer
 ;
 ;pre: MEMPTL, MEMPTH point to an address in the test range
 ;pre: ENDADL, ENDADH contain the ending address
-;pre: Y register contains index into test pattern
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NXTBYT:	DEC	PXIDX		;Decrement index to next pattern byte
+NXTBYT:	LDY	PXPTR
+	DEY			;Decrement index to next pattern byte
 	BNE	NXTBY1		;Nonzero, continue
-	LDY	PXSTRT+1	;Zero, reload from the current pattern start
-	STY	PXIDX		;Store it in the index var
-NXTBY1:	LDY	PXIDX		;Index to next pattery byte
-	LDA	PATTRN, Y	;Get next pattern entry
-	STA	PATBYT		;Save it
+	LDY	#PATLEN		;Zero, reload from the pattern length
+
+NXTBY1:	STY	PXPTR		;Store it in the index var
+	LDA	PATTRN, Y	;Get previous pattern entry
+	STA	PXPREV		;PXPREV = previous pattern
+	DEY			;Index to next pattern entry
+	STA	PATBYT		;PATBYT = expected pattern
 
 	LDA	#$00
 	CMP	PASCTR		;Are we on the first pass?
 	BEQ	NXTBY3		;First pass, don't read test yet
 
-	INY			;Going to verify, get previous element
-	LDA	PATTRN, Y
-	STA	PXPREV
 NXTBY2:	LDY	#$00
 	LDA	(MEMPTL), Y	;Get currently addressed memory contents
 	CMP	PXPREV		;Compare to the previous pattern byte
 	BEQ	NXTBY3		;OK, keep going
 	JSR	PRTERR		;Display error message
 
-
-NXTBY3:	LDA	PATBYT		;Get pattern byte
+NXTBY3:	LDA	PATBYT		;A = next pattern byte
 	LDY	#$00		;Clear index
 	STA	(MEMPTL), Y	;Store it at current address
 
@@ -515,6 +514,7 @@ PATTRN:	.byte	$01, $FE, $02, $FD, $04, $FB, $08, $F7
 	.byte	$10, $EF, $20, $FD, $40, $BF, $80, $7F
 	.byte	$00, $FF, $55, $AA, $33, $CC, $F0, $0F
 	.byte	$C3, $3C, $66, $99, $78
-PATEND:	.byte	$01
+
+PATEND:	.byte	$01		;Wrap pattern one byte
 
 PATLEN	=	PATEND - PATTRN	;Pattern length
