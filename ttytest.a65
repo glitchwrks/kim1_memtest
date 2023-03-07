@@ -296,12 +296,10 @@ HEXERR:	LDA	#$80
 ;pre: KIM-1 serial initialized
 ;post: A register contains received character
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-CIN:	TYA			;Preserve Y register
-	STA	CONTMP
+CIN:	STY	CONTMP
 	JSR	GETCH		;Get char from TTY
 	PHA			;Save char on stack
-	LDA	CONTMP		;Get contents of Y register
-	TAY			;Restore it
+	LDY	CONTMP		;Get contents of Y register
 	PLA			;A = char from TTY
 	RTS
 
@@ -323,14 +321,10 @@ CRLF:	LDA 	#$0D
 ;post: character printed to console
 ;post: A register contains character that was printed
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-COUT:	PHA			;Save char to print
-	TYA			;Preserve Y register
-	STA	CONTMP
-	PLA			;A = char to print
-	PHA			;Back on the stack
+COUT:	STY	CONTMP
+	PHA			;Preserve A on the stack
 	JSR	OUTCH		;Print A to TTY
-	LDA	CONTMP		;Restore Y register
-	TAY
+	LDY	CONTMP		;Restore Y register
 	PLA			;Restore A register.
 	RTS
 
