@@ -116,12 +116,6 @@ L02A9:	LDA	#'='		;Output '='
 L02AE:	CPX	#$0A		;At 10th character?
 	BMI	L024D		;No, get another one.
 
-;Received 10th character
-	LDA	USRCMD		;Get the user command that was received earlier
-	AND	#$3F		;Mask off 6 bits ('C' -> $03, 'L' -> $0C, 'T' -> $14)
-	CMP	#$03		;Compare?
-	BEQ	STRCMP		;Yes, start compare function
-
 ;Load function entry pointer
 ;fill memory with VAR1 until end pointer ENDADL
 	JSR	RESTRT
@@ -140,15 +134,6 @@ CRLUP:	JSR	CIN	;wait for keypress
 	CMP	#$0D	;CR?
 	BNE	CRLUP	;Loop if not a CR
 	JMP	START	;Start from the beginning
-
-;Compare function entry point
-STRCMP:	JSR	RESTRT		;Restore START value to MEMPTL
-L02DE:	LDA	VAR1
-	CMP	(MEMPTL),Y
-	BNE	TSTERR
-	JSR	INMPTR
-	BNE	L02DE
-	BEQ	L02C7
 
 ;Diplay the test error code
 ;A contains the value that should have been read back
@@ -404,8 +389,21 @@ NXTBY3:	LDA	PATBYT		;A = next pattern byte
 	LDY	#$00		;Clear index
 	STA	(MEMPTL), Y	;Store it at current address
 
-; Maybe come up with something to stress the location here? Martin used
-; a direct memory COM in the 6800 version, but we don't have that.
+	LDA	(MEMPTL), Y	;Invert byte in memory to stress this location
+	EOR	#$7F
+	STA	(MEMPTL), Y
+
+	LDA	(MEMPTL), Y	;Invert back to original value
+	EOR	#$7F
+	STA	(MEMPTL), Y
+
+	LDA	(MEMPTL), Y	;Invert again
+	EOR	#$7F
+	STA	(MEMPTL), Y
+
+	LDA	(MEMPTL), Y	;Invert back again
+	EOR	#$7F
+	STA	(MEMPTL), Y
 
 	INC	MEMPTL		;Increment memory pointer low byte
 	BNE	NXTBY4		;No overflow, continue
