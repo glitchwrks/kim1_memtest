@@ -337,7 +337,7 @@ COUT:	STY	CONTMP
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 NEWTST:	LDA	#$00
 	STA	PASCTR		;Zero the pass counter
-	LDY	#PATLEN		;Y = initial pattern start
+	LDY	#PATLEN+1	;Y = initial pattern start
 	STY	PXSTRT		;Save to the pattern start variable
 
 	INC	STARTL		;Fixup addresses from old OSI signon
